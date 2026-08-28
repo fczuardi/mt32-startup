@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+from ftplib import all_errors as ftp_errors
+import sys
+
+import device
+import profiles
+import settings
+import ui
+
+
+def die(message):
+    print(f"error: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def credentials(host):
+    user, password = settings.ftp()
+    try:
+        return user, password, device.state(host, user, password)
+    except ftp_errors:
+        user = ui.input_text("FTP user")
+        password = ui.input_text("FTP password", password=True)
+        settings.save_ftp(user, password)
+        return user, password, device.state(host, user, password)
+
+
+def dashboard(host):
+    user, password, state = credentials(host)
+    ui.box([
+        "mt32-config",
+        "",
+        f"Target:       {host}",
+        f"Boot synth:   {state['default_synth']}",
+        f"Startup SF2:  {state['soundfont_index']}  {state['soundfont']}",
+    ])
+
+    action = ui.choose("Action", ["Set boot synth", "Set startup SoundFont", "Quit"])
+    if action == "Set boot synth":
+        synth = ui.choose("Boot synth", ["soundfont", "mt32"])
+        pending = state | {"default_synth": synth}
+        save(host, user, password, state, pending, device.set_config_value(state["config"], "system", "default_synth", synth))
+    if action == "Set startup SoundFont":
+        selected = ui.choose("Startup SoundFont", [f"{index}  {name}" for index, name in enumerate(state["soundfonts"])])
+        index = selected.split()[0]
+        pending = state | {"soundfont_index": int(index), "soundfont": selected.split("  ", 1)[1]}
+        save(host, user, password, state, pending, device.set_config_value(state["config"], "fluidsynth", "soundfont", index))
+
+
+def save(host, user, password, current, pending, text):
+    ui.box([
+        "mt32-config",
+        "",
+        f"Target: {host}",
+        "",
+        "Current:",
+        f"  Boot synth:   {current['default_synth']}",
+        f"  Startup SF2:  {current['soundfont_index']}  {current['soundfont']}",
+        "",
+        "Pending:",
+        f"  Boot synth:   {pending['default_synth']}",
+        f"  Startup SF2:  {pending['soundfont_index']}  {pending['soundfont']}",
+        "",
+        "This changes startup behavior.",
+        "Restart the Pi for it to take effect.",
+    ])
+    if ui.confirm("Write /SD/mt32-pi.cfg?"):
+        device.write_config(host, user, password, text)
+        print("saved /SD/mt32-pi.cfg")
+        print("restart the Pi for startup changes to take effect")
+
+
+def main():
+    ui.require_gum()
+    dashboard(profiles.DEFAULT_HOST)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except ValueError as error:
+        die(error)
+    except ftp_errors as error:
+        die(error)

@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+import argparse
+from ftplib import all_errors as ftp_errors
+from pathlib import Path
+import socket
+import sys
+
+import device
+import profiles
+import settings
+import sf2
+import ui
+
+
+def die(message):
+    print(f"error: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def midi_byte(value, label):
+    if isinstance(value, int) and 0 <= value <= 127:
+        return value
+    die(f"{label} must be 0..127")
+
+
+def messages(channel, favorite):
+    if channel == 10 and favorite.get("bank", 0) != 128:
+        die("channel 10 is the percussion slot; choose a bank 128 kit")
+    if channel != 10 and favorite.get("bank", 0) == 128:
+        die("bank 128 kits only work on channel 10 with this device")
+    status = channel - 1
+    program = midi_byte(favorite.get("program"), f"channels.{channel}.program")
+    bank = favorite.get("bank", 0)
+    bank_msb, bank_lsb = bank // 128, bank % 128
+    return [
+        bytes([0xB0 | status, 0, midi_byte(bank_msb, "bank_msb")]),
+        bytes([0xB0 | status, 32, midi_byte(bank_lsb, "bank_lsb")]),
+        bytes([0xC0 | status, program]),
+    ]
+
+
+def profile_for(path):
+    return profiles.load(path) if path else profiles.blank()
+
+
+def pick_profile():
+    paths = sorted(str(path) for path in Path("profiles").glob("*.toml"))
+    if not paths:
+        die("no profiles/*.toml files found")
+    return ui.choose("Profile", paths)
+
+
+def pi_state(host):
+    user, password = settings.ftp()
+    state = fetch_state(host, user, password)
+    if state:
+        return state
+
+    user = ui.input_text("FTP user")
+    password = ui.input_text("FTP password", password=True)
+    settings.save_ftp(user, password)
+    return fetch_state(host, user, password) or die("FTP did not return device state")
+
+
+def fetch_state(host, user, password):
+    try:
+        return device.state(host, user, password)
+    except ftp_errors as error:
+        if user:
+            die(f"FTP failed: {error}")
+        return None
+
+
+def local_soundfont(pi_name):
+    root = settings.soundfont_root()
+    if not root:
+        root = Path(ui.folder("Local folder with the same SF2 files as the Pi"))
+        settings.save_soundfont_root(root)
+    matches = sorted(root.rglob(pi_name))
+    if not matches:
+        die(f"no local .sf2 matching {pi_name} under {root}")
+    return str(matches[0])
+
+
+def preflight(data):
+    state = pi_state(data["host"])
+    data["device_synth"] = state["default_synth"]
+    data["soundfont"] = state["soundfont"]
+    data["local_soundfont"] = local_soundfont(data["soundfont"])
+    data["preset_names"] = sf2.preset_map(data["local_soundfont"])
+    return data
+
+
+def edit_favorites(data):
+    channel = int(ui.choose("Start channel", [f"{channel:2d}  {label(data, favorite, channel)}" for channel, favorite in data["rows"]]).split()[0])
+    while channel <= 16:
+        try:
+            bank, program, name = pick_preset(channel, data["local_soundfont"])
+        except SystemExit:
+            break
+        data["rows"][channel - 1] = (channel, {"bank": bank, "program": program, "name": name})
+        profiles.save(data)
+        channel += 1
+    dashboard(data, False)
+
+
+def pick_preset(channel, soundfont):
+    choices = sf2.presets(soundfont)
+    if channel == 10:
+        choices = [preset for preset in choices if preset[0] == 128]
+    else:
+        choices = [preset for preset in choices if preset[0] != 128]
+    banks = sorted({bank for bank, program, name in choices})
+    bank = banks[0] if len(banks) == 1 else pick_bank(channel, choices, banks)
+    labels = [f"{program:03d}  {name}" for preset_bank, program, name in choices if preset_bank == bank]
+    selected = ui.choose(f"Channel {channel} bank {bank:03d} ({len(labels)} presets)", labels, height=20)
+    program = int(selected.split()[0])
+    return bank, program, selected.split("  ", 1)[1]
+
+
+def pick_bank(channel, choices, banks):
+    labels = []
+    for bank in banks:
+        count = sum(1 for preset_bank, program, name in choices if preset_bank == bank)
+        labels.append(f"{bank:03d}  {count} presets")
+    selected = ui.choose(f"Channel {channel} bank", labels)
+    return int(selected.split()[0])
+
+
+def apply(data, dry_run):
+    packet_count = 0
+    sock = None if dry_run else socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    for channel, favorite in data["rows"]:
+        if "program" not in favorite:
+            continue
+        for packet in messages(channel, favorite):
+            if sock:
+                sock.sendto(packet, (data["host"], data["port"]))
+            packet_count += 1
+    if sock:
+        sock.close()
+    if packet_count == 0:
+        die("no favorites set yet")
+    for channel, favorite in data["rows"]:
+        print(f"{channel:2d}  {label(data, favorite, channel)}")
+    print(f"\n{'would send' if dry_run else 'sent'} {packet_count} session MIDI message(s) to {data['host']}:{data['port']}")
+    print("favorites are runtime-only; rerun after reboot or synth reload")
+
+
+def dashboard(data, dry_run):
+    ui.box([
+        "mt32-favorites",
+        "",
+        f"Target:  {data['host']}:{data['port']}",
+        f"Profile: {data['name']}",
+        f"Boot:    {data['device_synth']}",
+        f"SF2:     {data['soundfont']}",
+        "",
+        "Channel favorites:",
+        *[f"  {channel:2d}  {label(data, favorite, channel)}" for channel, favorite in data["rows"]],
+    ])
+
+    actions = ["Edit favorites", "Choose profile", "Quit"]
+    if Path(data["path"]).exists():
+        actions.insert(1, "Apply now")
+    action = ui.choose("Action", actions)
+
+    if action == "Edit favorites":
+        edit_favorites(data)
+    if action == "Apply now":
+        apply(data, dry_run)
+    if action == "Choose profile":
+        dashboard(preflight(profile_for(pick_profile())), dry_run)
+
+
+def label(data, favorite, channel):
+    if favorite.get("name"):
+        return favorite["name"]
+    if "program" in favorite:
+        bank = favorite.get("bank", 0)
+        program = favorite["program"]
+        return data.get("preset_names", {}).get((bank, program), f"Bank {bank} Program {program}")
+
+    if channel == 10:
+        name = data.get("preset_names", {}).get((128, 0), "Bank 128 Program 0")
+        return f"{name} (default percussion)"
+    name = data.get("preset_names", {}).get((0, 0), "Bank 0 Program 0")
+    return f"{name} (default)"
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Edit and apply mt32-lupi session favorites.")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--apply-latest", action="store_true")
+    parser.add_argument("profile", nargs="?")
+    args = parser.parse_args()
+
+    if args.apply_latest:
+        latest = args.profile or profiles.latest()
+        if not latest:
+            die("no saved profile yet")
+        apply(profiles.load(latest), args.dry_run)
+        return
+
+    ui.require_gum()
+    current = preflight(profile_for(args.profile or profiles.latest()))
+    dashboard(current, args.dry_run)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (OSError, ValueError) as error:
+        die(error)
