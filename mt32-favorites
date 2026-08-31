@@ -23,21 +23,37 @@ def midi_byte(value, label):
     die(f"{label} must be 0..127")
 
 
-def messages(channel, favorite, allow_any_bank=False):
-    if not allow_any_bank:
-        if channel == 10 and favorite.get("bank", 0) != 128:
-            die("channel 10 is the percussion slot; choose a bank 128 kit")
-        if channel != 10 and favorite.get("bank", 0) == 128:
-            die("bank 128 kits only work on channel 10 with this device")
+def bank_number(value, label):
+    if isinstance(value, int) and 0 <= value <= 16383:
+        return value
+    die(f"{label} must be 0..16383")
+
+
+def messages(channel, favorite):
     status = channel - 1
     program = midi_byte(favorite.get("program"), f"channels.{channel}.program")
-    bank = favorite.get("bank", 0)
+    bank = bank_number(favorite.get("bank", 0), f"channels.{channel}.bank")
     bank_msb, bank_lsb = bank // 128, bank % 128
-    return [
+    packets = [gs_rhythm_part_message(channel, bank == 128)]
+    packets += [
         bytes([0xB0 | status, 0, midi_byte(bank_msb, "bank_msb")]),
         bytes([0xB0 | status, 32, midi_byte(bank_lsb, "bank_lsb")]),
         bytes([0xC0 | status, program]),
     ]
+    return packets
+
+
+def gs_rhythm_part_message(channel, enabled):
+    if not 1 <= channel <= 16:
+        die(f"channel {channel} must be 1..16")
+    part = 0 if channel == 10 else channel if channel <= 9 else channel - 1
+    address = [0x40, 0x10 | part, 0x15]
+    data = [1 if enabled else 0]
+    return bytes([0xF0, 0x41, 0x10, 0x42, 0x12, *address, *data, roland_checksum(address, data), 0xF7])
+
+
+def roland_checksum(address, data):
+    return (128 - ((sum(address) + sum(data)) & 0x7F)) & 0x7F
 
 
 def profile_for(path):
@@ -84,7 +100,6 @@ def local_soundfont(pi_name):
 
 
 def preflight(data):
-    data.setdefault("allow_any_bank", False)
     state = pi_state(data["host"])
     data["device_synth"] = state["default_synth"]
     data["soundfont"] = state["soundfont"]
@@ -97,7 +112,7 @@ def edit_favorites(data):
     channel = int(ui.choose("Start channel", [f"{channel:2d}  {label(data, favorite, channel)}" for channel, favorite in data["rows"]]).split()[0])
     while channel <= 16:
         try:
-            bank, program, name = pick_preset(channel, data["local_soundfont"], data["allow_any_bank"])
+            bank, program, name = pick_preset(channel, data["local_soundfont"])
         except SystemExit:
             break
         data["rows"][channel - 1] = (channel, {"bank": bank, "program": program, "name": name})
@@ -106,13 +121,8 @@ def edit_favorites(data):
     dashboard(data, False)
 
 
-def pick_preset(channel, soundfont, allow_any_bank=False):
+def pick_preset(channel, soundfont):
     choices = sf2.presets(soundfont)
-    if not allow_any_bank:
-        if channel == 10:
-            choices = [preset for preset in choices if preset[0] == 128]
-        else:
-            choices = [preset for preset in choices if preset[0] != 128]
     banks = sorted({bank for bank, program, name in choices})
     bank = banks[0] if len(banks) == 1 else pick_bank(channel, choices, banks)
     labels = [f"{program:03d}  {name}" for preset_bank, program, name in choices if preset_bank == bank]
@@ -136,7 +146,7 @@ def apply(data, dry_run):
     for channel, favorite in data["rows"]:
         if "program" not in favorite:
             continue
-        for packet in messages(channel, favorite, data["allow_any_bank"]):
+        for packet in messages(channel, favorite):
             if sock:
                 sock.sendto(packet, (data["host"], data["port"]))
             packet_count += 1
@@ -220,11 +230,14 @@ def render_channel_sections(data):
     for channel, favorite in data["rows"]:
         if "program" not in favorite:
             continue
-        messages(channel, favorite, data["allow_any_bank"])
+        if not 1 <= channel <= 16:
+            die(f"channel {channel} must be 1..16")
+        bank = bank_number(favorite.get("bank", 0), f"channels.{channel}.bank")
+        program = midi_byte(favorite["program"], f"channels.{channel}.program")
         lines += [
             f"[channel.{channel}]",
-            f"bank = {favorite.get('bank', 0)}",
-            f"program = {favorite['program']}",
+            f"bank = {bank}",
+            f"program = {program}",
             "",
         ]
     if len(lines) == 3:
@@ -240,7 +253,6 @@ def dashboard(data, dry_run):
         f"Profile: {data['name']}",
         f"Boot:    {data['device_synth']}",
         f"SF2:     {data['soundfont']}",
-        f"Banks:   {'any bank allowed' if data['allow_any_bank'] else 'channel 10 drum guardrails'}",
         "",
         "Channel favorites:",
         *[f"  {channel:2d}  {label(data, favorite, channel)}" for channel, favorite in data["rows"]],
@@ -259,9 +271,7 @@ def dashboard(data, dry_run):
     if action == "Apply now":
         apply(data, dry_run)
     if action == "Choose profile":
-        next_data = profile_for(pick_profile())
-        next_data["allow_any_bank"] = data["allow_any_bank"]
-        dashboard(preflight(next_data), dry_run)
+        dashboard(preflight(profile_for(pick_profile())), dry_run)
 
 
 def label(data, favorite, channel):
@@ -283,11 +293,6 @@ def main():
     parser = argparse.ArgumentParser(description="Edit and apply mt32-lupi session favorites.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--apply-latest", action="store_true")
-    parser.add_argument(
-        "--allow-any-bank",
-        action="store_true",
-        help="allow bank 128 on any channel for firmware/UDP behavior testing",
-    )
     parser.add_argument("profile", nargs="?")
     args = parser.parse_args()
 
@@ -295,14 +300,11 @@ def main():
         latest = args.profile or profiles.latest()
         if not latest:
             die("no saved profile yet")
-        data = profiles.load(latest)
-        data["allow_any_bank"] = args.allow_any_bank
-        apply(data, args.dry_run)
+        apply(profiles.load(latest), args.dry_run)
         return
 
     ui.require_gum()
     current = preflight(profile_for(args.profile or profiles.latest()))
-    current["allow_any_bank"] = args.allow_any_bank
     dashboard(current, args.dry_run)
 
 

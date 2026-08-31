@@ -80,11 +80,8 @@ To skip the dashboard and apply the newest profile:
 ./mt32-favorites --apply-latest
 ```
 
-To temporarily allow any bank on any channel while testing firmware behavior:
-
-```bash
-./mt32-favorites --allow-any-bank
-./mt32-favorites --allow-any-bank --apply-latest
-```
+`Apply now` sends GS rhythm-part SysEx messages before each channel's Bank
+Select / Program Change messages, so bank 128 drum presets can be applied on
+any channel when supported by the loaded SoundFont.
 
 Profiles are local TOML files. Use `Apply now` for runtime-only MIDI changes, or `Save to device startup` to write persistent channel presets for patched firmware.
