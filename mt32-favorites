@@ -34,7 +34,7 @@ def messages(channel, favorite):
     program = midi_byte(favorite.get("program"), f"channels.{channel}.program")
     bank = bank_number(favorite.get("bank", 0), f"channels.{channel}.bank")
     bank_msb, bank_lsb = bank // 128, bank % 128
-    packets = [gs_rhythm_part_message(channel, bank == 128)]
+    packets = [gs_rhythm_part_message(channel, is_drum_bank(bank))]
     packets += [
         bytes([0xB0 | status, 0, midi_byte(bank_msb, "bank_msb")]),
         bytes([0xB0 | status, 32, midi_byte(bank_lsb, "bank_lsb")]),
@@ -54,6 +54,10 @@ def gs_rhythm_part_message(channel, enabled):
 
 def roland_checksum(address, data):
     return (128 - ((sum(address) + sum(data)) & 0x7F)) & 0x7F
+
+
+def is_drum_bank(bank):
+    return bank in (120, 128)
 
 
 def profile_for(path):
