@@ -1,0 +1,89 @@
+[device]
+host = "mt32-pi.local"
+port = 1999
+
+[profile]
+name = "generaluser-gs"
+
+[soundfont]
+pi_name = "GeneralUser-GS.sf2"
+
+[channels.1]
+bank = 0
+program = 0
+name = "Grand Piano"
+
+[channels.2]
+bank = 0
+program = 16
+name = "Tonewheel Organ"
+
+[channels.3]
+bank = 0
+program = 24
+name = "Nylon Guitar"
+
+[channels.4]
+bank = 0
+program = 32
+name = "Acoustic Bass"
+
+[channels.5]
+bank = 0
+program = 41
+name = "Viola"
+
+[channels.6]
+bank = 0
+program = 48
+name = "Fast Strings"
+
+[channels.7]
+bank = 0
+program = 56
+name = "Trumpet"
+
+[channels.8]
+bank = 0
+program = 65
+name = "Alto Sax"
+
+[channels.9]
+bank = 0
+program = 73
+name = "Flute"
+
+[channels.10]
+bank = 128
+program = 0
+name = "Standard 1"
+
+[channels.11]
+bank = 0
+program = 80
+name = "Square Lead"
+
+[channels.12]
+bank = 0
+program = 88
+name = "Fantasia"
+
+[channels.13]
+bank = 0
+program = 95
+name = "Sweep Pad"
+
+[channels.14]
+bank = 0
+program = 104
+name = "Sitar"
+
+[channels.15]
+bank = 0
+program = 22
+name = "Harmonica"
+
+[channels.16]
+bank = 128
+program = 40
+name = "Brush"

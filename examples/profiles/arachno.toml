@@ -1,0 +1,89 @@
+[device]
+host = "mt32-pi.local"
+port = 1999
+
+[profile]
+name = "arachno"
+
+[soundfont]
+pi_name = "Arachno SoundFont - Version 1.0.sf2"
+
+[channels.1]
+bank = 0
+program = 3
+name = "Honky-Tonk Piano"
+
+[channels.2]
+bank = 0
+program = 18
+name = "Rock Organ"
+
+[channels.3]
+bank = 0
+program = 30
+name = "Distortion Guitar"
+
+[channels.4]
+bank = 0
+program = 31
+name = "Guitar Harmonics"
+
+[channels.5]
+bank = 0
+program = 38
+name = "Synth Bass 1"
+
+[channels.6]
+bank = 0
+program = 50
+name = "Synth Strings 1"
+
+[channels.7]
+bank = 0
+program = 55
+name = "Orchestra Hit"
+
+[channels.8]
+bank = 0
+program = 62
+name = "Synth Brass 1"
+
+[channels.9]
+bank = 0
+program = 80
+name = "Square Wave"
+
+[channels.10]
+bank = 128
+program = 16
+name = "Power Drum Kit"
+
+[channels.11]
+bank = 0
+program = 81
+name = "Saw Wave"
+
+[channels.12]
+bank = 0
+program = 87
+name = "Bass & Lead"
+
+[channels.13]
+bank = 0
+program = 90
+name = "Poly Synth"
+
+[channels.14]
+bank = 0
+program = 102
+name = "Echo Drops"
+
+[channels.15]
+bank = 0
+program = 22
+name = "Harmonica"
+
+[channels.16]
+bank = 128
+program = 25
+name = "TR-808/909 Drum Kit"

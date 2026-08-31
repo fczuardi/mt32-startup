@@ -1,0 +1,89 @@
+[device]
+host = "mt32-pi.local"
+port = 1999
+
+[profile]
+name = "fluidr3-gm"
+
+[soundfont]
+pi_name = "FluidR3 GM.sf2"
+
+[channels.1]
+bank = 0
+program = 0
+name = "Yamaha Grand Piano"
+
+[channels.2]
+bank = 0
+program = 24
+name = "Nylon String Guitar"
+
+[channels.3]
+bank = 0
+program = 29
+name = "Overdrive Guitar"
+
+[channels.4]
+bank = 0
+program = 34
+name = "Picked Bass"
+
+[channels.5]
+bank = 0
+program = 40
+name = "Violin"
+
+[channels.6]
+bank = 0
+program = 48
+name = "Strings"
+
+[channels.7]
+bank = 0
+program = 52
+name = "Ahh Choir"
+
+[channels.8]
+bank = 0
+program = 60
+name = "French Horns"
+
+[channels.9]
+bank = 0
+program = 68
+name = "Oboe"
+
+[channels.10]
+bank = 128
+program = 0
+name = "Standard"
+
+[channels.11]
+bank = 0
+program = 71
+name = "Clarinet"
+
+[channels.12]
+bank = 0
+program = 73
+name = "Flute"
+
+[channels.13]
+bank = 0
+program = 75
+name = "Pan Flute"
+
+[channels.14]
+bank = 0
+program = 109
+name = "BagPipe"
+
+[channels.15]
+bank = 0
+program = 22
+name = "Harmonica"
+
+[channels.16]
+bank = 128
+program = 48
+name = "Orchestra Kit"

@@ -85,3 +85,15 @@ Select / Program Change messages, so known drum banks such as 120 and 128 can
 be applied on any channel when supported by the loaded SoundFont.
 
 Profiles are local TOML files. Use `Apply now` for runtime-only MIDI changes, or `Save to device startup` to write persistent channel presets for patched firmware.
+
+## Example Profiles
+
+Tracked example profiles live under `examples/profiles/`. They capture one
+working 16-channel favorite layout for each tested SoundFont while keeping
+machine-local profiles under `profiles/` ignored.
+
+```bash
+./mt32-favorites --dry-run --apply-latest examples/profiles/arachno.toml
+./mt32-favorites --dry-run --apply-latest examples/profiles/fluidr3-gm.toml
+./mt32-favorites --dry-run --apply-latest examples/profiles/generaluser-gs.toml
+```
