@@ -1,7 +1,8 @@
-from ftplib import FTP
+from ftplib import FTP, error_perm
 from io import BytesIO
 
 CONFIG = "/SD/mt32-pi.cfg"
+SOUNDFONTS = "/SD/soundfonts"
 
 
 def state(host, user, password):
@@ -28,8 +29,30 @@ def write_config(host, user, password, text):
         ftp.storbinary("STOR " + CONFIG, BytesIO(text.encode("utf-8")))
 
 
+def soundfont_config_path(soundfont):
+    base = soundfont.rsplit(".", 1)[0]
+    return f"{SOUNDFONTS}/{base}.cfg"
+
+
+def read_soundfont_config(host, user, password, soundfont):
+    with FTP(host, timeout=5) as ftp:
+        ftp.login(user or "anonymous", password)
+        try:
+            return download_text(ftp, soundfont_config_path(soundfont))
+        except error_perm as error:
+            if not str(error).startswith("550"):
+                raise
+            return ""
+
+
+def write_soundfont_config(host, user, password, soundfont, text):
+    with FTP(host, timeout=5) as ftp:
+        ftp.login(user or "anonymous", password)
+        ftp.storbinary("STOR " + soundfont_config_path(soundfont), BytesIO(text.encode("utf-8")))
+
+
 def soundfonts_from(ftp):
-    ftp.cwd("/SD/soundfonts")
+    ftp.cwd(SOUNDFONTS)
     names = sorted(name for name in ftp.nlst() if name.lower().endswith(".sf2"))
     if not names:
         raise ValueError("no .sf2 files found in /SD/soundfonts")

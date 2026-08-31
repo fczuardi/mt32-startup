@@ -23,11 +23,12 @@ def midi_byte(value, label):
     die(f"{label} must be 0..127")
 
 
-def messages(channel, favorite):
-    if channel == 10 and favorite.get("bank", 0) != 128:
-        die("channel 10 is the percussion slot; choose a bank 128 kit")
-    if channel != 10 and favorite.get("bank", 0) == 128:
-        die("bank 128 kits only work on channel 10 with this device")
+def messages(channel, favorite, allow_any_bank=False):
+    if not allow_any_bank:
+        if channel == 10 and favorite.get("bank", 0) != 128:
+            die("channel 10 is the percussion slot; choose a bank 128 kit")
+        if channel != 10 and favorite.get("bank", 0) == 128:
+            die("bank 128 kits only work on channel 10 with this device")
     status = channel - 1
     program = midi_byte(favorite.get("program"), f"channels.{channel}.program")
     bank = favorite.get("bank", 0)
@@ -83,6 +84,7 @@ def local_soundfont(pi_name):
 
 
 def preflight(data):
+    data.setdefault("allow_any_bank", False)
     state = pi_state(data["host"])
     data["device_synth"] = state["default_synth"]
     data["soundfont"] = state["soundfont"]
@@ -95,7 +97,7 @@ def edit_favorites(data):
     channel = int(ui.choose("Start channel", [f"{channel:2d}  {label(data, favorite, channel)}" for channel, favorite in data["rows"]]).split()[0])
     while channel <= 16:
         try:
-            bank, program, name = pick_preset(channel, data["local_soundfont"])
+            bank, program, name = pick_preset(channel, data["local_soundfont"], data["allow_any_bank"])
         except SystemExit:
             break
         data["rows"][channel - 1] = (channel, {"bank": bank, "program": program, "name": name})
@@ -104,12 +106,13 @@ def edit_favorites(data):
     dashboard(data, False)
 
 
-def pick_preset(channel, soundfont):
+def pick_preset(channel, soundfont, allow_any_bank=False):
     choices = sf2.presets(soundfont)
-    if channel == 10:
-        choices = [preset for preset in choices if preset[0] == 128]
-    else:
-        choices = [preset for preset in choices if preset[0] != 128]
+    if not allow_any_bank:
+        if channel == 10:
+            choices = [preset for preset in choices if preset[0] == 128]
+        else:
+            choices = [preset for preset in choices if preset[0] != 128]
     banks = sorted({bank for bank, program, name in choices})
     bank = banks[0] if len(banks) == 1 else pick_bank(channel, choices, banks)
     labels = [f"{program:03d}  {name}" for preset_bank, program, name in choices if preset_bank == bank]
@@ -133,7 +136,7 @@ def apply(data, dry_run):
     for channel, favorite in data["rows"]:
         if "program" not in favorite:
             continue
-        for packet in messages(channel, favorite):
+        for packet in messages(channel, favorite, data["allow_any_bank"]):
             if sock:
                 sock.sendto(packet, (data["host"], data["port"]))
             packet_count += 1
@@ -144,7 +147,89 @@ def apply(data, dry_run):
     for channel, favorite in data["rows"]:
         print(f"{channel:2d}  {label(data, favorite, channel)}")
     print(f"\n{'would send' if dry_run else 'sent'} {packet_count} session MIDI message(s) to {data['host']}:{data['port']}")
-    print("favorites are runtime-only; rerun after reboot or synth reload")
+    print("use Save to device startup to persist favorites after reboot or synth reload")
+
+
+def save_startup(data, dry_run):
+    text = replace_channel_sections(
+        device.read_soundfont_config(data["host"], *settings.ftp(), data["soundfont"]),
+        render_channel_sections(data),
+    )
+    ui.box([
+        "mt32-favorites",
+        "",
+        f"Target: {data['host']}",
+        f"SF2:    {data['soundfont']}",
+        f"CFG:    {device.soundfont_config_path(data['soundfont'])}",
+        "",
+        "This writes channel favorites to the SoundFont startup config.",
+        "They will apply when this SoundFont is loaded.",
+    ])
+    if dry_run:
+        print(text, end="")
+        return
+    if ui.confirm("Write SoundFont startup config?"):
+        device.write_soundfont_config(data["host"], *settings.ftp(), data["soundfont"], text)
+        print(f"saved {device.soundfont_config_path(data['soundfont'])}")
+
+
+def replace_channel_sections(text, channel_sections):
+    lines = text.splitlines()
+    kept = []
+    skipping = False
+    for line in lines:
+        section = section_name(line)
+        if section:
+            skipping = is_channel_section(section)
+        if not skipping:
+            kept.append(line)
+
+    while kept and not kept[-1].strip():
+        kept.pop()
+
+    if kept:
+        kept.append("")
+        kept.append("")
+    kept.extend(channel_sections.splitlines())
+    return "\n".join(kept) + "\n"
+
+
+def section_name(line):
+    stripped = line.split("#", 1)[0].strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        return stripped[1:-1].strip()
+    return ""
+
+
+def is_channel_section(section):
+    if not section.startswith("channel."):
+        return False
+    try:
+        channel = int(section.split(".", 1)[1])
+    except ValueError:
+        return False
+    return 1 <= channel <= 16
+
+
+def render_channel_sections(data):
+    lines = [
+        "# Channel startup presets written by mt32-favorites.",
+        "# Channels are 1-based; bank/program values are raw FluidSynth values.",
+        "",
+    ]
+    for channel, favorite in data["rows"]:
+        if "program" not in favorite:
+            continue
+        messages(channel, favorite, data["allow_any_bank"])
+        lines += [
+            f"[channel.{channel}]",
+            f"bank = {favorite.get('bank', 0)}",
+            f"program = {favorite['program']}",
+            "",
+        ]
+    if len(lines) == 3:
+        die("no favorites set yet")
+    return "\n".join(lines)
 
 
 def dashboard(data, dry_run):
@@ -155,6 +240,7 @@ def dashboard(data, dry_run):
         f"Profile: {data['name']}",
         f"Boot:    {data['device_synth']}",
         f"SF2:     {data['soundfont']}",
+        f"Banks:   {'any bank allowed' if data['allow_any_bank'] else 'channel 10 drum guardrails'}",
         "",
         "Channel favorites:",
         *[f"  {channel:2d}  {label(data, favorite, channel)}" for channel, favorite in data["rows"]],
@@ -162,15 +248,20 @@ def dashboard(data, dry_run):
 
     actions = ["Edit favorites", "Choose profile", "Quit"]
     if Path(data["path"]).exists():
-        actions.insert(1, "Apply now")
+        actions.insert(1, "Save to device startup")
+        actions.insert(2, "Apply now")
     action = ui.choose("Action", actions)
 
     if action == "Edit favorites":
         edit_favorites(data)
+    if action == "Save to device startup":
+        save_startup(data, dry_run)
     if action == "Apply now":
         apply(data, dry_run)
     if action == "Choose profile":
-        dashboard(preflight(profile_for(pick_profile())), dry_run)
+        next_data = profile_for(pick_profile())
+        next_data["allow_any_bank"] = data["allow_any_bank"]
+        dashboard(preflight(next_data), dry_run)
 
 
 def label(data, favorite, channel):
@@ -192,6 +283,11 @@ def main():
     parser = argparse.ArgumentParser(description="Edit and apply mt32-lupi session favorites.")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--apply-latest", action="store_true")
+    parser.add_argument(
+        "--allow-any-bank",
+        action="store_true",
+        help="allow bank 128 on any channel for firmware/UDP behavior testing",
+    )
     parser.add_argument("profile", nargs="?")
     args = parser.parse_args()
 
@@ -199,11 +295,14 @@ def main():
         latest = args.profile or profiles.latest()
         if not latest:
             die("no saved profile yet")
-        apply(profiles.load(latest), args.dry_run)
+        data = profiles.load(latest)
+        data["allow_any_bank"] = args.allow_any_bank
+        apply(data, args.dry_run)
         return
 
     ui.require_gum()
     current = preflight(profile_for(args.profile or profiles.latest()))
+    current["allow_any_bank"] = args.allow_any_bank
     dashboard(current, args.dry_run)
 
 

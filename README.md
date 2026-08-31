@@ -2,7 +2,7 @@
 
 A small companion utility for configuring and initializing an [mt32-lupi](https://github.com/mo-g/mt32-lupi) device from another computer.
 
-The immediate goal is deliberately modest: make a headless mt32-lupi setup nicer to use with a compact MIDI controller, without requiring firmware changes.
+The immediate goal is deliberately modest: make a headless mt32-lupi setup nicer to use with a compact MIDI controller.
 
 ## Initial scope
 
@@ -13,13 +13,14 @@ These helpers aim to:
 - define useful bank/program assignments for MIDI channels 1–16;
 - save those assignments as local profiles;
 - apply channel assignments at runtime using mt32-lupi's raw UDP MIDI input;
+- save channel assignments to per-SoundFont startup configs on patched firmware;
 - update persistent mt32-lupi configuration over FTP when necessary.
 
 ## Why
 
 Stock FluidSynth starts melodic MIDI channels on the default piano program (with channel 10 reserved for drums). On a controller that can switch MIDI channels directly, those channels can instead become a handy set of instant instrument bookmarks.
 
-The current workaround is to send Bank Select / Program Change messages after mt32-lupi boots. `mt32-startup` is intended to make that setup repeatable and pleasant.
+The current workaround is to send Bank Select / Program Change messages after mt32-lupi boots. On patched firmware, `mt32-startup` can also write those presets into the SoundFont's startup config.
 
 ## Current architecture idea
 
@@ -34,12 +35,12 @@ MIDI controller
 | mt32 helpers|
 +-------------+
   |         |
-  |         +--> FTP: persistent mt32-pi.cfg changes
+  |         +--> FTP: persistent mt32-pi.cfg and SoundFont .cfg changes
   |
   +------------> UDP/1999: live MIDI Bank Select / Program Change
 ```
 
-For the first version, channel favorites are runtime state: they do not survive an mt32-lupi reboot, so `mt32-favorites` reapplies them when run.
+Channel favorites can be applied to the current session over UDP, or saved to the active SoundFont's startup `.cfg` on firmware that supports channel preset sections.
 
 ## Status
 
@@ -53,7 +54,7 @@ This project has two small `gum` entrypoints. Local `config.toml` and saved `pro
 ./mt32-favorites
 ```
 
-`mt32-favorites` edits local channel favorite profiles and applies them to the current session over UDP/1999. Before showing the dashboard, it reads `/SD/mt32-pi.cfg` and `/SD/soundfonts` over FTP to identify the configured startup SoundFont, then matches that filename under your local SoundFont folder.
+`mt32-favorites` edits local channel favorite profiles, applies them to the current session over UDP/1999, and can save them to the active SoundFont's startup `.cfg` over FTP. Before showing the dashboard, it reads `/SD/mt32-pi.cfg` and `/SD/soundfonts` over FTP to identify the configured startup SoundFont, then matches that filename under your local SoundFont folder.
 
 ```bash
 ./mt32-config
@@ -79,4 +80,11 @@ To skip the dashboard and apply the newest profile:
 ./mt32-favorites --apply-latest
 ```
 
-Profiles are local TOML files. Runtime channel favorites are not persistent mt32-lupi configuration; rerun the command after the Pi reboots or reloads the synth.
+To temporarily allow any bank on any channel while testing firmware behavior:
+
+```bash
+./mt32-favorites --allow-any-bank
+./mt32-favorites --allow-any-bank --apply-latest
+```
+
+Profiles are local TOML files. Use `Apply now` for runtime-only MIDI changes, or `Save to device startup` to write persistent channel presets for patched firmware.
